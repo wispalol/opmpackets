@@ -16,7 +16,7 @@ tasks {
         configurations.add(compileShadowOnly)
 
         destinationDirectory = rootProject.layout.buildDirectory.dir("libs")
-        archiveFileName = "packetevents-${project.name}-${rootProject.ext["versionNoHash"]}.jar"
+        archiveFileName = "opmpackets-${project.name}-${rootProject.ext["versionNoHash"]}.jar"
         archiveClassifier = null
 
         relocate("net.kyori.adventure.text.serializer", "opmpackets.adventure.serializer")
@@ -33,7 +33,7 @@ tasks {
     register<ShadowJar>("shadowNoAdventure") {
         group = rootProject.name
         description = "Create a combined JAR of project and runtime dependencies without Adventure dependencies."
-        archiveFileName = "packetevents-${project.name}-no-adv-${rootProject.ext["versionNoHash"]}.jar"
+        archiveFileName = "opmpackets-${project.name}-no-adv-${rootProject.ext["versionNoHash"]}.jar"
         archiveClassifier = null
 
         val shadowJar = shadowJar.get()
