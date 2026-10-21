@@ -1,0 +1,166 @@
+/*
+ * This file is part of opmpackets - https://github.com/wispalol/opmpackets
+ * Copyright (C) 2022 retrooper and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+package opmpackets.injector;
+
+import opmpackets.PacketEvents;
+import opmpackets.PacketEventsAPI;
+import opmpackets.injector.ChannelInjector;
+import opmpackets.protocol.player.User;
+import opmpackets.util.reflection.Reflection;
+import opmpackets.util.reflection.ReflectionObject;
+import com.velocitypowered.api.proxy.Player;
+import com.velocitypowered.api.proxy.ProxyServer;
+import opmpackets.handlers.PacketEventsDecoder;
+import opmpackets.handlers.PacketEventsEncoder;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelInitializer;
+import org.jetbrains.annotations.ApiStatus;
+import org.spongepowered.configurate.util.CheckedConsumer;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.function.Supplier;
+
+@ApiStatus.Internal
+public class VelocityPipelineInjector implements ChannelInjector {
+
+    private static Class<?> CONNECTION_MANAGER_CLASS, SERVER_INITIALIZER_HOLDER_CLASS, BACKEND_INITIALIZER_HOLDER_CLASS;
+    private static Method SET_SERVER_INTIIALIZER, SET_BACKEND_INITIALIZER;
+
+    private final PacketEventsAPI<?> packetevents;
+    private final ProxyServer server;
+
+    public VelocityPipelineInjector(PacketEventsAPI<?> packetevents, ProxyServer server) {
+        this.packetevents = packetevents;
+        this.server = server;
+    }
+
+    @Override
+    public boolean isServerBound() {
+        return true;
+    }
+
+    @Override
+    public void inject() {
+        if (CONNECTION_MANAGER_CLASS == null) {
+            CONNECTION_MANAGER_CLASS = Reflection.getClassByNameWithoutException("com.velocitypowered.proxy.network.ConnectionManager");
+            SERVER_INITIALIZER_HOLDER_CLASS = Reflection.getClassByNameWithoutException("com.velocitypowered.proxy.network.ServerChannelInitializerHolder");
+            BACKEND_INITIALIZER_HOLDER_CLASS = Reflection.getClassByNameWithoutException("com.velocitypowered.proxy.network.BackendChannelInitializerHolder");
+            SET_SERVER_INTIIALIZER = Reflection.getMethod(SERVER_INITIALIZER_HOLDER_CLASS, 0, ChannelInitializer.class);
+        }
+        Supplier<ChannelInitializer<Channel>> initializerHolder = getServerChannelInitializerHolder();
+        ChannelInitializer<Channel> wrappedProxyInitializer = initializerHolder.get();
+        VelocityChannelInitializer initializer = new VelocityChannelInitializer(wrappedProxyInitializer);
+        try {
+            SET_SERVER_INTIIALIZER.invoke(initializerHolder, initializer);
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            e.printStackTrace();
+        }
+        //TODO Do we also register in backend initializer?
+       /* Object backendInitializerHolder = reflectConnectionManager.readObject(0, BACKEND_INITIALIZER_HOLDER_CLASS);
+        ChannelInitializer<Channel> wrappedBackendInitializer = ((Supplier<ChannelInitializer<Channel>>) backendInitializerHolder).get();
+        try {
+            SET_BACKEND_INITIALIZER.invoke(backendInitializerHolder, new VelocityChannelInitializer(wrappedBackendInitializer));
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            e.printStackTrace();
+        }*/
+    }
+
+    @Override
+    public void uninject() {
+        Supplier<ChannelInitializer<Channel>> holder = this.getServerChannelInitializerHolder();
+        ChannelInitializer<?> wrapper = holder.get();
+        CheckedConsumer<ChannelInitializer<Channel>, ReflectiveOperationException> uninjector = (initializer) -> {
+            this.packetevents.getLogManager().info("Uninjecting from Velocity channel initializer...");
+            SET_SERVER_INTIIALIZER.invoke(holder, initializer);
+        };
+
+        try {
+            while (true) {
+                // Check if it's our initializer, could be wrapped by other plugins
+                if (wrapper instanceof VelocityChannelInitializer) {
+                    uninjector.accept(((VelocityChannelInitializer) wrapper).getWrappedInitializer());
+                    break;
+                } else {
+                    // walk up wrapper tree, if possible to find a single matching field
+                    // this accounts for other plugins (e.g. ViaVersion) also replacing the injector, which may
+                    // wrap our already wrapped injector
+                    Field field = Reflection.getField(wrapper.getClass(), ChannelInitializer.class, 0);
+                    if (field == null) {
+                        throw new IllegalStateException("Can't unwrap foreign channel initializer: " + wrapper);
+                    }
+                    field.setAccessible(true);
+                    ChannelInitializer<?> thisWrapper = wrapper;
+                    wrapper = (ChannelInitializer<?>) field.get(thisWrapper);
+                    uninjector = initializer -> {
+                        field.set(thisWrapper, initializer);
+                        this.packetevents.getLogManager().info("Uninjected from plugin channel initializer " + thisWrapper);
+                    };
+                }
+            }
+        } catch (ReflectiveOperationException exception) {
+            throw new RuntimeException("Failed to uninject from frontend pipeline", exception);
+        }
+    }
+
+    @Override
+    public void updateUser(Object channel, User user) {
+        PacketEventsDecoder decoder = (PacketEventsDecoder) ((Channel) channel).pipeline().get(PacketEvents.DECODER_NAME);
+        decoder.user = user;
+
+        PacketEventsEncoder encoder = (PacketEventsEncoder) ((Channel) channel).pipeline().get(PacketEvents.ENCODER_NAME);
+        encoder.user = user;
+    }
+
+    @Override
+    public boolean isPlayerSet(Object ch) {
+        if (ch == null) return false;
+        Channel channel = (Channel) ch;
+        PacketEventsEncoder encoder = (PacketEventsEncoder) channel.pipeline().get(PacketEvents.ENCODER_NAME);
+        if (encoder.player != null) return true;
+
+        PacketEventsDecoder decoder = (PacketEventsDecoder) channel.pipeline().get(PacketEvents.DECODER_NAME);
+        return decoder.player != null;
+    }
+
+    @Override
+    public void setPlayer(Object ch, Object p) {
+        Channel channel = (Channel) ch;
+        Player player = (Player) p;
+        PacketEventsDecoder decoder = (PacketEventsDecoder) channel.pipeline().get(PacketEvents.DECODER_NAME);
+        decoder.player = player;
+        decoder.user.getProfile().setUUID(player.getUniqueId());
+        decoder.user.getProfile().setName(player.getUsername());
+        PacketEventsEncoder encoder = (PacketEventsEncoder) channel.pipeline().get(PacketEvents.ENCODER_NAME);
+        encoder.player = player;
+    }
+
+    @Override
+    public boolean isProxy() {
+        return true;
+    }
+
+    private Supplier<ChannelInitializer<Channel>> getServerChannelInitializerHolder() {
+        ReflectionObject reflectServer = new ReflectionObject(server);
+        Object connectionManager = reflectServer.readObject(0, CONNECTION_MANAGER_CLASS);
+        ReflectionObject reflectConnectionManager = new ReflectionObject(connectionManager);
+        return (Supplier<ChannelInitializer<Channel>>) reflectConnectionManager.readObject(0, SERVER_INITIALIZER_HOLDER_CLASS);
+    }
+}

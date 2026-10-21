@@ -1,0 +1,60 @@
+/*
+ * This file is part of opmpackets - https://github.com/wispalol/opmpackets
+ * Copyright (C) 2025 wispalol and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+package opmpackets.protocol.score;
+
+import opmpackets.PacketEvents;
+import opmpackets.manager.server.ServerVersion;
+import opmpackets.protocol.mapper.AbstractMappedEntity;
+import opmpackets.util.mappings.TypesBuilderData;
+import opmpackets.wrapper.PacketWrapper;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nullable;
+
+public class StaticScoreFormatType<T extends ScoreFormat> extends AbstractMappedEntity implements ScoreFormatType<T> {
+
+    private final PacketWrapper.Reader<T> reader;
+    private final PacketWrapper.Writer<T> writer;
+
+    @ApiStatus.Internal
+    public StaticScoreFormatType(
+            @Nullable TypesBuilderData data,
+            PacketWrapper.Reader<T> reader,
+            PacketWrapper.Writer<T> writer
+    ) {
+        super(data);
+        this.reader = reader;
+        this.writer = writer;
+    }
+
+    @Override
+    public int getId() {
+        ServerVersion version = PacketEvents.getAPI().getServerManager().getVersion();
+        return this.getId(version.toClientVersion());
+    }
+
+    @Override
+    public T read(PacketWrapper<?> wrapper) {
+        return this.reader.apply(wrapper);
+    }
+
+    @Override
+    public void write(PacketWrapper<?> wrapper, T format) {
+        this.writer.accept(wrapper, format);
+    }
+}
