@@ -1,6 +1,6 @@
 {
   "id": "packetevents",
-  "name": "PacketEvents",
+  "name": "opmpackets",
   "version": "${version}",
   "description": "Packet library.",
   "authors": [

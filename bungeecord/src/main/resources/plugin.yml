@@ -1,4 +1,4 @@
-name: packetevents
+name: opmpackets
 version: ${version}
 main: opmpackets.PacketEventsPlugin
-author: retrooper
+author: wispalol

@@ -1,8 +1,8 @@
-name: packetevents
+name: opmpackets
 version: ${version}
 api-version: 1.13
 main: opmpackets.PacketEventsPlugin
-author: retrooper
+author: wispalol
 folia-supported: true
 softdepend:
   - ProtocolLib
